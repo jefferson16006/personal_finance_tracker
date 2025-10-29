@@ -121,8 +121,7 @@ curl -X POST http://localhost:8000/api/v1/user/transactions \
 
 ## Status
 
-Core functionality implemented
-Future: Reporting, Analytics, Recurring Payments
+Core functionality implemented. Future: Reporting, Analytics, Recurring Payments
 
 ---
 
