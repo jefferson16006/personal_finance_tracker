@@ -2,7 +2,7 @@
 
 A backend REST API for managing personal finances.
 This project allows users to track income, expenses, categories, and transactions.
-Built with **Node.js**, **Express**, and **PostgreSQL**, with authentication handled via **JWT**.
+Built with **Node.js**, **Express**, **Typescript**, and **PostgreSQL**, with authentication handled via **JWT**.
 
 ---
 
