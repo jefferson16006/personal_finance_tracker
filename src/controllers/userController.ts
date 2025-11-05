@@ -36,14 +36,21 @@ export const register = async(
   if (!emailRegex.test(email)) {
     throw new AppError("Please provide a valid email address.", 400, true);
   }
+
+  const client = await pool.connect();
+
   try {
-    const existingEmail = await pool.query("SELECT email FROM users WHERE email = $1", [email.toLowerCase()]);
+    await client.query('BEGIN');
+
+    const existingEmail = await client.query("SELECT email FROM users WHERE email = $1", [email.toLowerCase()]);
     console.log(existingEmail);
     if(existingEmail.rows.length > 0) {
       throw new AppError("This email is already in use.", 400, true);
     }
+
     const hashed_pwd = await hash_pwd(password);
     const user = await createUserService(
+      client,
       name.trim(),
       email.toLowerCase().trim(),
       hashed_pwd
@@ -51,23 +58,28 @@ export const register = async(
     const userId = user.user_id;
 
     const categoryPromises = defaultCategories.map(category => {
-      return createCategoryService(userId, category.name, category.type);
+      return createCategoryService(client, userId, category.name, category.type);
     });
     await Promise.all(categoryPromises);
+
+    await client.query('COMMIT');
 
     const token = generateJWT({
       userId,
       name: user.name
     });
-    sendSuccess(res, "User created successfully", { user }, token, 201)
+    sendSuccess(res, "User created successfully", { user }, token, 201);
   } catch (error) {
-      if (error instanceof AppError) {
-        sendError(res, error.message, error.statusCode);
-      } else {
-        console.error(error); // Log the underlying error
-        throw new AppError("A database or service error occurred during registration.", 500, false);
-      }
+    await client.query('ROLLBACK');
+    if (error instanceof AppError) {
+      return sendError(res, error.message, error.statusCode);
+    } else {
+      console.error(error);
+      return sendError(res, "A database or service error occurred during registration.", 500);
     }
+  } finally {
+    client.release();
+  }
 }
 
 export const login = async(
@@ -78,9 +90,13 @@ export const login = async(
     if(!email?.trim() || !password?.trim()) {
         throw new AppError("Please fill out each field.", 400, true);
     }
+
+    const client = await pool.connect();
     
     try {
-      const existingEmail = await pool.query("SELECT * FROM users WHERE email = $1", [email.toLowerCase()]);
+      await client.query('BEGIN');
+
+      const existingEmail = await client.query("SELECT * FROM users WHERE email = $1", [email.toLowerCase()]);
       if(existingEmail.rows.length === 0) {
         throw new AppError("Invalid email or password", 404, true);
       }
@@ -88,29 +104,53 @@ export const login = async(
       if(!isPasswordCorrect) {
         throw new AppError("Invalid email or password", 400, true);
       }
+
+      await client.query('COMMIT');
+
       const token = generateJWT({
         userId: existingEmail.rows[0].user_id,
         name: existingEmail.rows[0].name
       });
-      sendSuccessNoData(res, "User logged in successfully", token, 200)
+      sendSuccessNoData(res, "User logged in successfully", token, 200);
     } catch (error) {
-        if (error instanceof AppError) {
-          sendError(res, error.message, error.statusCode);
-       } else {
-          console.error(error); // Log the underlying error
-          throw new AppError("A database or service error occurred during log in.", 500, false);
-        }
+      await client.query('ROLLBACK');
+      if (error instanceof AppError) {
+        return sendError(res, error.message, error.statusCode);
+      } else {
+        console.error(error);
+        return sendError(res, "A database or service error occurred during log in.", 500);
+      }
+    } finally {
+      client.release();
     }
 }
 
 export const getBalance = async(req: Request, res: Response): Promise<void> => {
-  const result = await pool.query(
-    "SELECT balance FROM users WHERE user_id = $1",
-    [req.user?.userId]
-  );
-  if(result.rows.length === 0) {
-    throw new AppError("User does not exist.", 404, true)
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const result = await client.query(
+      "SELECT balance FROM users WHERE user_id = $1",
+      [req.user?.userId]
+    );
+    if(result.rows.length === 0) {
+      throw new AppError("User does not exist.", 404, true);
+    }
+    console.log(result.rows[0]);
+
+    await client.query('COMMIT');
+    sendSuccess(res, "Balance fetched successfully.", result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    if (error instanceof AppError) {
+      return sendError(res, error.message, error.statusCode);
+    } else {
+      console.error(error);
+      return sendError(res, "A database error occurred while fetching balance.", 500);
+    }
+  } finally {
+    client.release();
   }
-  console.log(result.rows[0]);
-  sendSuccess(res, "Balanced fetched successfully.", result.rows[0]);
 }
