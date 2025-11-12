@@ -17,7 +17,7 @@ export interface TransactionResponse {
 }
 
 export interface GetTransactionQuery {
-  type?: string;
+  type?: "income" | "expense";
   category_id?: string;
 }
 

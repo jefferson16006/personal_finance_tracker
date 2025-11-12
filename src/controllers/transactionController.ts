@@ -85,26 +85,37 @@ export const createTransaction = async(
 }
 
 // Retrieve transaction - GET
-export const getTransaction = async(
-  req: Request<{ id: string }, {}, {}, GetTransactionQuery>,
+export const getTransaction = async (
+  req: Request<{}, {}, {}, GetTransactionQuery>,
   res: Response
 ): Promise<void> => {
   const client = await pool.connect();
-  
-  try {
-    await client.query('BEGIN');
 
-    const { id } = req.params;
+  try {
+    await client.query("BEGIN");
+    
+    // Get user ID from authenticated token
+    const userId = req.user?.userId;
+    
+    if (!userId) {
+      throw new AppError("User not authenticated", 401, true);
+    }
+
     const { type, category_id } = req.query;
 
-    const userExists = await client.query("SELECT user_id FROM users WHERE user_id = $1", [id]);
+    // Verify user exists
+    const userExists = await client.query(
+      "SELECT user_id FROM users WHERE user_id = $1",
+      [userId]
+    );
+    
     if (userExists.rows.length === 0) {
       throw new AppError("User not found", 404, true);
     }
 
     // Dynamic query
     let query = "SELECT * FROM transactions WHERE user_id = $1";
-    const queryParams: any[] = [id];
+    const queryParams: any[] = [userId];
     let paramCount = 1;
 
     if (type) {
@@ -119,23 +130,73 @@ export const getTransaction = async(
       queryParams.push(category_id);
     }
 
+    query += " ORDER BY created_at DESC";
+
     const transaction = await client.query(query, queryParams);
-    
-    await client.query('COMMIT');
+
+    await client.query("COMMIT");
     sendSuccess(res, "Transactions retrieved successfully.", transaction.rows);
-    
   } catch (error) {
-    await client.query('ROLLBACK');
+    await client.query("ROLLBACK");
     if (error instanceof AppError) {
       sendError(res, error.message, error.statusCode);
     } else {
-      console.error(error); 
-      throw new AppError("A database error occurred while fetching transactions.", 500, false);
+      console.error(error);
+      throw new AppError(
+        "A database error occurred while fetching transactions.",
+        500,
+        false
+      );
     }
   } finally {
     client.release();
   }
-}
+};
+
+// Retrieve single transaction - GET
+export const getSingleTransaction = async (
+  req: Request<{ id: string }>,
+  res: Response
+): Promise<void> => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    
+    const userId = req.user?.userId;
+    const { id } = req.params;
+    
+    if (!userId) {
+      throw new AppError("User not authenticated", 401, true);
+    }
+
+    const result = await client.query(
+      "SELECT * FROM transactions WHERE transaction_id = $1 AND user_id = $2",
+      [id, userId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new AppError("Transaction not found", 404, true);
+    }
+
+    await client.query("COMMIT");
+    sendSuccess(res, "Transaction retrieved successfully.", result.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    if (error instanceof AppError) {
+      sendError(res, error.message, error.statusCode);
+    } else {
+      console.error(error);
+      throw new AppError(
+        "A database error occurred while fetching transaction.",
+        500,
+        false
+      );
+    }
+  } finally {
+    client.release();
+  }
+};
 
 // Update transaction - PATCH
 export const updateTransaction = async (

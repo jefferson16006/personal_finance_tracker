@@ -4,6 +4,10 @@ import pool from "../config/db";
 import { sendError, sendSuccess } from "../utils/responseFormat";
 import { createCategoryService, deleteCategoryService, updateCategoryService } from "../services/categoryService";
 
+interface GetCategoriesQuery {
+  type?: "income" | "expense";
+}
+
 export const createNewCategory = async(
   req: Request,
   res: Response
@@ -135,3 +139,53 @@ export const deleteCategory = async(
     client.release();
   }
 }
+
+// Get all categories for authenticated user
+export const getCategories = async (
+  req: Request<{}, {}, {}, GetCategoriesQuery>,
+  res: Response
+): Promise<void> => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    
+    const userId = req.user?.userId;
+    
+    // if (!userId) {
+    //   throw new AppError("User not authenticated", 401, true);
+    // }
+
+    const { type } = req.query;
+
+    // Dynamic query to filter by type if provided
+    let query = "SELECT category_id, name, type, created_at FROM categories WHERE user_id = $1";
+    const queryParams: any[] = [userId];
+
+    if (type) {
+      query += " AND type = $2";
+      queryParams.push(type);
+    }
+
+    query += " ORDER BY name ASC";
+
+    const result = await client.query(query, queryParams);
+
+    await client.query("COMMIT");
+    sendSuccess(res, "Categories retrieved successfully.", result.rows);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    if (error instanceof AppError) {
+      sendError(res, error.message, error.statusCode);
+    } else {
+      console.error(error);
+      throw new AppError(
+        "A database error occurred while fetching categories.",
+        500,
+        false
+      );
+    }
+  } finally {
+    client.release();
+  }
+};
